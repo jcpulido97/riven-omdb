@@ -137,11 +137,13 @@ class MediaItem(db.Model):
     @staticmethod
     def __generate_composite_key(item: dict) -> str | None:
         """Generate a composite key for the item."""
-        trakt_id = item.get("trakt_id", None)
-        if not trakt_id:
-            return None
+        if explicit_id := item.get("id"):
+            return str(explicit_id)
         item_type = item.get("type", "unknown")
-        return f"{item_type}_{trakt_id}"
+        for id_type in ("trakt_id", "imdb_id", "tvdb_id", "tmdb_id"):
+            if external_id := item.get(id_type):
+                return f"{item_type}_{external_id}"
+        return None
 
     def store_state(self, given_state=None) -> tuple[States, States]:
         """Store the state of the item."""

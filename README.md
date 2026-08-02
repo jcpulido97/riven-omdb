@@ -86,6 +86,18 @@ Curious how it works? Here's an [explainer video](https://www.youtube.com/watch?
 
 ## Self Hosted
 
+### OMDb metadata backport
+
+This branch is based on Riven `v0.23.6` and uses OMDb as its default IMDb
+indexer for movies, series, seasons, episodes, and release dates. Configure
+`OMDB_API_KEY` in the backend environment. Trakt remains optional for Trakt
+watchlists and third-party ID conversion, and no shared Trakt client ID is
+embedded in the image.
+
+The public image is `ghcr.io/jcpulido97/riven-omdb:latest`. The root API
+endpoint (`GET /api/v1/`) reports both version `0.23.6` and the exact Git
+commit baked into the image.
+
 ### Docker Compose
 
 Copy over the contents of [docker-compose.yml](docker-compose.yml) to your `docker-compose.yml` file.

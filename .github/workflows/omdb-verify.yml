@@ -1,0 +1,29 @@
+name: Verify OMDb Workflow
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Poetry
+        run: pipx install poetry==2.1.2
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: poetry
+      - name: Install project dependencies
+        run: poetry install --with dev --no-root
+      - name: Lint backport
+        run: poetry run ruff check src/program/metadata src/program/apis/omdb_api.py src/program/services/indexers/omdb.py src/program/utils/torrent.py src/tests/test_omdb_backport.py src/tests/test_torrent_utils.py
+      - name: Test OMDb and manual sessions
+        run: poetry run pytest -q src/tests/test_omdb_backport.py src/tests/test_torrent_utils.py src/tests/test_scrape_route_compatibility.py

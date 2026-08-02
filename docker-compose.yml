@@ -15,7 +15,7 @@ services:
                 condition: service_started
 
     riven:
-        image: spoked/riven:latest
+        image: ghcr.io/jcpulido97/riven-omdb:latest
         container_name: riven
         restart: unless-stopped
         ports:
@@ -27,6 +27,7 @@ services:
             - TZ=America/New_York
             - RIVEN_FORCE_ENV=true
             - RIVEN_DATABASE_HOST=postgresql+psycopg2://postgres:postgres@riven-db/riven
+            - OMDB_API_KEY=${OMDB_API_KEY:-}
         healthcheck:
             test: curl -s http://localhost:8080 >/dev/null || exit 1
             interval: 30s

@@ -6,3 +6,4 @@ class MessageResponse(BaseModel):
 
 class RootResponse(MessageResponse):
     version: str
+    commit: str

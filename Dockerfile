@@ -11,7 +11,7 @@ RUN apk add --no-cache \
     curl
 
 # Upgrade pip and install poetry
-RUN pip install --upgrade pip && pip install poetry==1.8.3
+RUN pip install --upgrade pip && pip install poetry==2.1.2
 
 ENV POETRY_NO_INTERACTION=1 \
     POETRY_VIRTUALENVS_IN_PROJECT=1 \
@@ -26,12 +26,14 @@ RUN poetry install --without dev --no-root && rm -rf $POETRY_CACHE_DIR
 
 # Final Image
 FROM python:3.11-alpine
+ARG RIVEN_COMMIT_SHA=unknown
 LABEL name="Riven" \
       description="Riven Media Server" \
-      url="https://github.com/rivenmedia/riven"
+      url="https://github.com/jcpulido97/riven-omdb"
 
 # Install system dependencies and Node.js
-ENV PYTHONUNBUFFERED=1
+ENV PYTHONUNBUFFERED=1 \
+    RIVEN_COMMIT_SHA=${RIVEN_COMMIT_SHA}
 RUN apk add --no-cache \
     curl \
     shadow \

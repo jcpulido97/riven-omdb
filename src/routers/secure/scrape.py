@@ -1,5 +1,4 @@
 import asyncio
-import re
 from datetime import datetime, timedelta
 from typing import Any, Dict, Literal, Optional, TypeAlias, Union
 from uuid import uuid4
@@ -16,10 +15,12 @@ from program.db.db import db
 from program.media.item import MediaItem
 from program.media.stream import Stream as ItemStream
 from program.services.downloaders import Downloader
-from program.services.indexers.trakt import TraktIndexer
+from program.services.indexers.omdb import OMDbIndexer
 from program.services.scrapers import Scraping
 from program.services.scrapers.shared import rtn
 from program.types import Event
+from program.metadata import normalize_item_identifiers
+from program.utils.torrent import extract_infohash
 from program.services.downloaders.models import TorrentContainer, TorrentInfo, DebridFile
 
 
@@ -53,6 +54,7 @@ class UpdateAttributesResponse(BaseModel):
 
 class SessionResponse(BaseModel):
     message: str
+
 
 ContainerMap: TypeAlias = Dict[str, DebridFile]
 
@@ -93,6 +95,12 @@ class ShowFileData(RootModel[SeasonEpisodeMap]):
     """
 
     root: SeasonEpisodeMap
+
+
+class SessionActionRequest(BaseModel):
+    action: Literal["select_files", "update_attributes", "abort", "complete"]
+    files: Optional[Container] = None
+    file_data: Optional[Union[DebridFile, ShowFileData]] = None
 
 class ScrapingSession:
     def __init__(self, id: str, item_id: str, magnet: str):
@@ -201,7 +209,7 @@ def scrape_item(request: Request, id: str) -> ScrapeItemResponse:
         item_id = id
 
     if services := request.app.program.services:
-        indexer = services[TraktIndexer]
+        indexer = services[OMDbIndexer]
         scraper = services[Scraping]
     else:
         raise HTTPException(status_code=412, detail="Scraping services not initialized")
@@ -238,33 +246,34 @@ def scrape_item(request: Request, id: str) -> ScrapeItemResponse:
     summary="Start a manual scraping session",
     operation_id="start_manual_session"
 )
+@router.post(
+    "/start_session",
+    summary="Start a manual scraping session",
+    operation_id="start_manual_session_canonical"
+)
 async def start_manual_session(
     request: Request,
     background_tasks: BackgroundTasks,
-    item_id: str,
-    magnet: str
+    magnet: str,
+    item_id: Optional[str] = None,
+    imdb_id: Optional[str] = None,
 ) -> StartSessionResponse:
     session_manager.cleanup_expired(background_tasks)
 
-    def get_info_hash(magnet: str) -> str:
-        pattern = r"[A-Fa-f0-9]{40}"
-        match = re.search(pattern, magnet)
-        return match.group(0) if match else None
+    try:
+        item_id, imdb_id = normalize_item_identifiers(item_id, imdb_id)
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error))
 
-    info_hash = get_info_hash(magnet)
+    info_hash = extract_infohash(magnet)
     if not info_hash:
         raise HTTPException(status_code=400, detail="Invalid magnet URI")
 
-    # Identify item based on IMDb or database ID
-    if item_id.startswith("tt"):
-        imdb_id = item_id
-        item_id = None
-    else:
-        imdb_id = None
-        item_id = item_id
+    if item_id is None and imdb_id is None:
+        raise HTTPException(status_code=400, detail="No item identifier provided")
 
     if services := request.app.program.services:
-        indexer = services[TraktIndexer]
+        indexer = services[OMDbIndexer]
         downloader = services[Downloader]
     else:
         raise HTTPException(status_code=412, detail="Required services not initialized")
@@ -273,7 +282,10 @@ async def start_manual_session(
 
     if imdb_id:
         prepared_item = MediaItem({"imdb_id": imdb_id})
-        item = next(indexer.run(prepared_item))
+        try:
+            item = next(indexer.run(prepared_item))
+        except StopIteration:
+            raise HTTPException(status_code=404, detail="IMDb item not found in OMDb")
     else:
         item = db_functions.get_item_by_id(item_id)
 
@@ -310,6 +322,11 @@ async def start_manual_session(
     "/scrape/select_files/{session_id}",
     summary="Select files for torrent id, for this to be instant it requires files to be one of /manual/instant_availability response containers",
     operation_id="manual_select"
+)
+@router.post(
+    "/select_files/{session_id}",
+    summary="Select files for a manual scraping session",
+    operation_id="manual_select_canonical"
 )
 def manual_select_files(request: Request, session_id: str, files: Container) -> SelectFilesResponse:
     downloader: Downloader = request.app.program.services.get(Downloader)
@@ -351,10 +368,14 @@ async def manual_update_attributes(request: Request, session_id, data: Union[Deb
 
     with db.Session() as db_session:
         if str(session.item_id).startswith("tt") and not db_functions.get_item_by_external_id(imdb_id=session.item_id) and not db_functions.get_item_by_id(session.item_id):
+            indexer = request.app.program.services.get(OMDbIndexer)
+            if indexer is None:
+                raise HTTPException(status_code=412, detail="OMDb indexer unavailable")
             prepared_item = MediaItem({"imdb_id": session.item_id})
-            item = next(TraktIndexer().run(prepared_item))
-            if not item:
-                raise HTTPException(status_code=404, detail="Unable to index item")
+            try:
+                item = next(indexer.run(prepared_item))
+            except StopIteration:
+                raise HTTPException(status_code=404, detail="IMDb item not found in OMDb")
             db_session.merge(item)
             db_session.commit()
         else:
@@ -443,6 +464,37 @@ async def complete_manual_session(_: Request, session_id: str) -> SessionRespons
 
     session_manager.complete_session(session_id)
     return {"message": f"Completed session {session_id}"}
+
+
+@router.post(
+    "/scrape/session/{session_id}",
+    summary="Perform an action on a scraping session",
+    operation_id="session_action_compatibility",
+)
+@router.post(
+    "/session/{session_id}",
+    summary="Perform an action on a scraping session",
+    operation_id="session_action",
+)
+async def session_action(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    session_id: str,
+    action_request: SessionActionRequest,
+):
+    if action_request.action == "select_files":
+        if action_request.files is None:
+            raise HTTPException(status_code=400, detail="files required")
+        return manual_select_files(request, session_id, action_request.files)
+    if action_request.action == "update_attributes":
+        if action_request.file_data is None:
+            raise HTTPException(status_code=400, detail="file_data required")
+        return await manual_update_attributes(
+            request, session_id, action_request.file_data
+        )
+    if action_request.action == "abort":
+        return await abort_manual_session(request, background_tasks, session_id)
+    return await complete_manual_session(request, session_id)
 
 class ParseTorrentTitleResponse(BaseModel):
     message: str

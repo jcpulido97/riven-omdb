@@ -47,11 +47,6 @@ class TraktAPI:
     """Handles Trakt API communication"""
 
     BASE_URL = "https://api.trakt.tv"
-    CLIENT_ID = os.environ.get(
-        "TRAKT_API_CLIENT_ID",
-        "0183a05ad97098d87287fe46da4ae286f434f32e8e951caad4cc147c947d79a3",
-    )
-
     patterns: dict[str, re.Pattern] = {
         "user_list": re.compile(r"https://trakt.tv/users/([^/]+)/lists/([^/]+)"),
         "short_list": re.compile(r"https://trakt.tv/lists/\d+"),
@@ -59,6 +54,7 @@ class TraktAPI:
 
     def __init__(self, settings: TraktModel):
         self.settings = settings
+        self.client_id = os.environ.get("TRAKT_API_CLIENT_ID") or settings.api_key
         self.oauth_client_id = self.settings.oauth.oauth_client_id
         self.oauth_client_secret = self.settings.oauth.oauth_client_secret
         self.oauth_redirect_uri = self.settings.oauth.oauth_redirect_uri
@@ -66,7 +62,7 @@ class TraktAPI:
         session = create_service_session(rate_limit_params=rate_limit_params)
         self.headers = {
             "Content-type": "application/json",
-            "trakt-api-key": self.CLIENT_ID,
+            "trakt-api-key": self.client_id,
             "trakt-api-version": "2",
         }
         session.headers.update(self.headers)

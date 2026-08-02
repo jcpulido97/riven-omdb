@@ -17,7 +17,7 @@ from program.db.db import db, get_db
 from program.media.item import MediaItem
 from program.media.state import States
 from program.services.content import Overseerr
-from program.services.indexers.trakt import TraktIndexer
+from program.services.indexers.omdb import OMDbIndexer
 from program.symlink import Symlinker
 from program.types import Event
 from program.services.libraries.symlink import fix_broken_symlinks
@@ -613,12 +613,12 @@ class ReindexResponse(BaseModel):
 
 @router.post(
     "/reindex",
-    summary="Reindex item with Trakt Indexer to pick up new season & episode releases.",
+    summary="Reindex item with OMDb to pick up new season and episode releases.",
     description="Submits an item to be re-indexed through the indexer to manually fix shows that don't have release dates. Only works for movies and shows. Requires item id as a parameter.",
-    operation_id="trakt_reindexer"
+    operation_id="omdb_reindexer"
 )
 async def reindex_item(request: Request, item_id: Optional[str] = None, imdb_id: Optional[str] = None) -> ReindexResponse:
-    """Reindex item through Trakt manually"""
+    """Reindex an item through the configured metadata indexer."""
     if item_id:
         item: MediaItem = db_functions.get_item_by_id(item_id)
     elif imdb_id:
@@ -633,9 +633,9 @@ async def reindex_item(request: Request, item_id: Optional[str] = None, imdb_id:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Item must be a movie or show")
 
     try:
-        trakt_indexer = request.app.program.all_services[TraktIndexer]
+        omdb_indexer = request.app.program.all_services[OMDbIndexer]
         item.indexed_at = None
-        reindexed_item = next(trakt_indexer.run(item, log_msg=True))
+        reindexed_item = next(omdb_indexer.run(item, log_msg=True))
         
         if reindexed_item:
             with db.Session() as session:

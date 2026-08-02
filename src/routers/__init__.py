@@ -1,3 +1,5 @@
+import os
+
 from fastapi import Depends, Request
 from fastapi.routing import APIRouter
 
@@ -20,6 +22,7 @@ async def root(_: Request) -> RootResponse:
     return {
         "message": "Riven is running!",
         "version": settings_manager.settings.version,
+        "commit": os.environ.get("RIVEN_COMMIT_SHA", "unknown"),
     }
 
 app_router.include_router(default_router, dependencies=[Depends(resolve_api_key)])
