@@ -60,6 +60,14 @@ has no usable release date, and the optional Trakt content service remains
 available for watchlists, collections, and discovery when configured with your
 own Trakt API key. The upstream hard-coded Trakt client ID has been removed.
 
+OMDb is registered through Riven's provider-neutral `MetadataService`. A future
+provider only needs to implement the `MetadataProvider` protocol, return the
+shared `TitleMetadata` and `SeasonMetadata` models, and be registered with the
+service. Indexers require no provider-specific changes. Providers are queried
+in registration order and automatically fall through when one is disabled,
+unavailable, or has no result. Lower-priority providers fill missing fields
+without overwriting values returned by higher-priority providers.
+
 ### Installation
 
 1) Find a good place on your hard drive we can call mount from now on. For the sake of things I will call it /path/to/riven/mount.

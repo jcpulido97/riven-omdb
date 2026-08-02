@@ -5,10 +5,10 @@ from datetime import datetime
 from kink import di
 from loguru import logger
 
-from program.apis.omdb_api import OMDbAPI, OMDbTitle
 from program.apis.tmdb_api import TMDBApi
 from program.core.runner import MediaItemGenerator, RunnerResult
 from program.media.item import MediaItem, Movie
+from program.metadata import MetadataService, TitleMetadata
 from program.services.indexers.base import BaseIndexer
 
 
@@ -19,10 +19,10 @@ class TMDBIndexer(BaseIndexer):
         super().__init__()
 
         self.api = di[TMDBApi]
-        self.omdb_api = di[OMDbAPI]
+        self.metadata = di[MetadataService]
 
     @staticmethod
-    def _omdb_aliases(metadata: OMDbTitle | None) -> dict[str, list[str]]:
+    def _metadata_aliases(metadata: TitleMetadata | None) -> dict[str, list[str]]:
         return {"us": [metadata.title]} if metadata and metadata.title else {}
 
     def run(
@@ -113,10 +113,10 @@ class TMDBIndexer(BaseIndexer):
                 )
             )
 
-            omdb_metadata = self.omdb_api.get_title(movie_details.imdb_id or imdb_id)
+            metadata = self.metadata.get_title(movie_details.imdb_id or imdb_id)
 
             # Parse release date
-            release_date = omdb_metadata.released_at if omdb_metadata else None
+            release_date = metadata.released_at if metadata else None
 
             if release_date is None and movie_details.release_date:
                 try:
@@ -162,7 +162,7 @@ class TMDBIndexer(BaseIndexer):
 
                         break
 
-            aliases = self._omdb_aliases(omdb_metadata)
+            aliases = self._metadata_aliases(metadata)
 
             full_poster_url = (
                 f"https://image.tmdb.org/t/p/w500{movie_details.poster_path}"
@@ -251,8 +251,8 @@ class TMDBIndexer(BaseIndexer):
             return None
 
         try:
-            omdb_metadata = self.omdb_api.get_title(movie_details.imdb_id or imdb_id)
-            release_date = omdb_metadata.released_at if omdb_metadata else None
+            metadata = self.metadata.get_title(movie_details.imdb_id or imdb_id)
+            release_date = metadata.released_at if metadata else None
 
             if release_date is None and movie_details.release_date:
                 release_date = datetime.strptime(movie_details.release_date, "%Y-%m-%d")
@@ -292,7 +292,7 @@ class TMDBIndexer(BaseIndexer):
 
                         break
 
-            aliases = self._omdb_aliases(omdb_metadata)
+            aliases = self._metadata_aliases(metadata)
 
             full_poster_url = (
                 f"https://image.tmdb.org/t/p/w500{movie_details.poster_path}"

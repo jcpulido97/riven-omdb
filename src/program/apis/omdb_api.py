@@ -1,6 +1,7 @@
-"""OMDb API client used for release-date metadata."""
+"""OMDb implementation of Riven's metadata-provider contract."""
 
 import os
+import re
 from datetime import datetime
 from typing import Any
 
@@ -9,12 +10,11 @@ from loguru import logger
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from requests import RequestException
 
+from program.metadata.models import EpisodeMetadata, SeasonMetadata, TitleMetadata
 from program.utils.request import SmartSession
 
 
-class OMDbTitle(BaseModel):
-    """The subset of an OMDb title response used by Riven."""
-
+class _OMDbTitleResponse(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     title: str | None = Field(default=None, alias="Title")
@@ -22,14 +22,8 @@ class OMDbTitle(BaseModel):
     imdb_id: str | None = Field(default=None, alias="imdbID")
     media_type: str | None = Field(default=None, alias="Type")
 
-    @property
-    def released_at(self) -> datetime | None:
-        return OMDbAPI.parse_release_date(self.released)
 
-
-class OMDbEpisode(BaseModel):
-    """An episode returned by an OMDb season lookup."""
-
+class _OMDbEpisodeResponse(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     title: str | None = Field(default=None, alias="Title")
@@ -37,69 +31,44 @@ class OMDbEpisode(BaseModel):
     released: str | None = Field(default=None, alias="Released")
     imdb_id: str | None = Field(default=None, alias="imdbID")
 
-    @property
-    def released_at(self) -> datetime | None:
-        return OMDbAPI.parse_release_date(self.released)
 
-
-class OMDbSeason(BaseModel):
-    """A season and its episodes returned by OMDb."""
-
+class _OMDbSeasonResponse(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     title: str | None = Field(default=None, alias="Title")
     season: int = Field(alias="Season")
-    episodes: list[OMDbEpisode] = Field(default_factory=list, alias="Episodes")
-
-    @property
-    def released_at(self) -> datetime | None:
-        dates = [episode.released_at for episode in self.episodes]
-        return min(
-            (
-                date
-                for episode, date in zip(self.episodes, dates, strict=True)
-                if episode.number > 0 and date is not None
-            ),
-            default=None,
-        )
-
-    def episode_release_dates(self) -> dict[int, datetime]:
-        return {
-            episode.number: released_at
-            for episode in self.episodes
-            if (released_at := episode.released_at) is not None
-        }
+    episodes: list[_OMDbEpisodeResponse] = Field(default_factory=list, alias="Episodes")
 
 
 class OMDbAPI:
-    """Small OMDb client for title, season, and episode release metadata."""
+    """OMDb metadata provider for titles, seasons, and episodes."""
 
+    name = "omdb"
     BASE_URL = "https://www.omdbapi.com"
     API_KEY = os.environ.get("OMDB_API_KEY", "")
+    IMDB_ID_PATTERN = re.compile(r"^tt\d{7,10}$", re.IGNORECASE)
 
     def __init__(self, api_key: str | None = None):
         self.api_key = api_key or self.API_KEY
-        self._title_cache = TTLCache[str, OMDbTitle | None](maxsize=4096, ttl=86400)
-        self._season_cache = TTLCache[tuple[str, int], OMDbSeason | None](
+        self._title_cache = TTLCache[str, TitleMetadata | None](maxsize=4096, ttl=86400)
+        self._season_cache = TTLCache[tuple[str, int], SeasonMetadata | None](
             maxsize=4096, ttl=21600
         )
         self.session = SmartSession(
             base_url=self.BASE_URL,
-            rate_limits={
-                "www.omdbapi.com": {
-                    "rate": 4,
-                    "capacity": 4,
-                }
-            },
+            rate_limits={"www.omdbapi.com": {"rate": 4, "capacity": 4}},
             retries=2,
             backoff_factor=0.3,
         )
 
+    @property
+    def is_configured(self) -> bool:
+        return bool(self.api_key)
+
     def _get(self, **params: str | int) -> dict[str, Any] | None:
         """Make an OMDb request, always including the configured API key."""
 
-        if not self.api_key:
-            logger.debug("OMDB_API_KEY is not configured; skipping OMDb request")
+        if not self.is_configured:
             return None
 
         try:
@@ -122,8 +91,10 @@ class OMDbAPI:
             logger.debug(f"OMDb request failed: {error}")
             return None
 
-    def get_title(self, imdb_id: str | None) -> OMDbTitle | None:
-        if not imdb_id:
+    def get_title(self, imdb_id: str | None) -> TitleMetadata | None:
+        imdb_id = self.normalize_imdb_id(imdb_id)
+
+        if imdb_id is None:
             return None
 
         if imdb_id in self._title_cache:
@@ -132,7 +103,17 @@ class OMDbAPI:
         data = self._get(i=imdb_id, plot="short", r="json")
 
         try:
-            result = OMDbTitle.model_validate(data) if data else None
+            response = _OMDbTitleResponse.model_validate(data) if data else None
+            result = (
+                TitleMetadata(
+                    title=response.title,
+                    released_at=self.parse_release_date(response.released),
+                    imdb_id=response.imdb_id,
+                    media_type=response.media_type,
+                )
+                if response
+                else None
+            )
         except ValidationError as error:
             logger.debug(f"Invalid OMDb title response for {imdb_id}: {error}")
             result = None
@@ -140,8 +121,12 @@ class OMDbAPI:
         self._title_cache[imdb_id] = result
         return result
 
-    def get_season(self, imdb_id: str | None, season_number: int) -> OMDbSeason | None:
-        if not imdb_id:
+    def get_season(
+        self, imdb_id: str | None, season_number: int
+    ) -> SeasonMetadata | None:
+        imdb_id = self.normalize_imdb_id(imdb_id)
+
+        if imdb_id is None:
             return None
 
         cache_key = (imdb_id, season_number)
@@ -152,7 +137,24 @@ class OMDbAPI:
         data = self._get(i=imdb_id, Season=season_number, r="json")
 
         try:
-            result = OMDbSeason.model_validate(data) if data else None
+            response = _OMDbSeasonResponse.model_validate(data) if data else None
+            result = (
+                SeasonMetadata(
+                    number=response.season,
+                    title=response.title,
+                    episodes=[
+                        EpisodeMetadata(
+                            number=episode.number,
+                            title=episode.title,
+                            released_at=self.parse_release_date(episode.released),
+                            imdb_id=episode.imdb_id,
+                        )
+                        for episode in response.episodes
+                    ],
+                )
+                if response
+                else None
+            )
         except ValidationError as error:
             logger.debug(
                 f"Invalid OMDb season response for {imdb_id} S{season_number}: {error}"
@@ -161,6 +163,21 @@ class OMDbAPI:
 
         self._season_cache[cache_key] = result
         return result
+
+    @classmethod
+    def normalize_imdb_id(cls, value: str | None) -> str | None:
+        """Return a canonical IMDb ID or None when the value is invalid."""
+
+        if not value:
+            return None
+
+        imdb_id = value.strip().lower()
+
+        if not cls.IMDB_ID_PATTERN.fullmatch(imdb_id):
+            logger.debug(f"Invalid IMDb ID for OMDb lookup: {value!r}")
+            return None
+
+        return imdb_id
 
     @staticmethod
     def parse_release_date(value: str | None) -> datetime | None:

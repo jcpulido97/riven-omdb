@@ -770,6 +770,25 @@ def scrape_item(
         )
 
 
+@router.get(
+    "/scrape/{imdb_id}",
+    summary="Get streams for an IMDb ID",
+    operation_id="scrape_item_by_imdb_id",
+)
+def scrape_item_by_imdb_id(
+    imdb_id: Annotated[
+        str,
+        Path(
+            pattern=r"^tt\d{7,10}$",
+            description="The IMDb ID of the media item",
+        ),
+    ],
+):
+    """Compatibility route for clients that put the IMDb ID in the path."""
+
+    return scrape_item(imdb_id=imdb_id)
+
+
 @router.post(
     "/start_session",
     summary="Start a manual scraping session",

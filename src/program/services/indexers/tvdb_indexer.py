@@ -6,10 +6,10 @@ import regex
 from kink import di
 from loguru import logger
 
-from program.apis.omdb_api import OMDbAPI, OMDbTitle
 from program.apis.tvdb_api import SeriesRelease, TVDBApi
 from program.core.runner import MediaItemGenerator, RunnerResult
 from program.media.item import Episode, MediaItem, Season, Show
+from program.metadata import MetadataService, TitleMetadata
 from program.services.indexers.base import BaseIndexer
 from schemas.tvdb import EpisodeBaseRecord, SeasonExtendedRecord
 
@@ -21,11 +21,11 @@ class TVDBIndexer(BaseIndexer):
         super().__init__()
 
         self.api = di[TVDBApi]
-        self.omdb_api = di[OMDbAPI]
+        self.metadata = di[MetadataService]
 
     @staticmethod
-    def _add_omdb_title_alias(
-        aliases: dict[str, list[str]], metadata: OMDbTitle | None
+    def _add_metadata_title_alias(
+        aliases: dict[str, list[str]], metadata: TitleMetadata | None
     ) -> dict[str, list[str]]:
         if metadata and metadata.title:
             aliases.setdefault("us", []).append(metadata.title)
@@ -133,10 +133,10 @@ class TVDBIndexer(BaseIndexer):
                     None,
                 )
 
-            omdb_metadata = self.omdb_api.get_title(imdb_id)
+            metadata = self.metadata.get_title(imdb_id)
 
-            # Prefer OMDb's release date, falling back to TVDB.
-            aired_at = omdb_metadata.released_at if omdb_metadata else None
+            # Prefer pluggable provider metadata, falling back to TVDB.
+            aired_at = metadata.released_at if metadata else None
 
             if aired_at is None and (first_aired := show_data.first_aired):
                 try:
@@ -153,7 +153,7 @@ class TVDBIndexer(BaseIndexer):
                 network = show_data.original_network.name
 
             aliases = self.api.get_aliases(show_data) or {}
-            aliases = self._add_omdb_title_alias(aliases, omdb_metadata)
+            aliases = self._add_metadata_title_alias(aliases, metadata)
 
             slug = (show_data.slug or "").replace("-", " ").title()
             aliases.setdefault("us", []).append(slug.title())
@@ -300,8 +300,8 @@ class TVDBIndexer(BaseIndexer):
                     None,
                 )
 
-            omdb_metadata = self.omdb_api.get_title(imdb_id)
-            aired_at = omdb_metadata.released_at if omdb_metadata else None
+            metadata = self.metadata.get_title(imdb_id)
+            aired_at = metadata.released_at if metadata else None
 
             if aired_at is None and (first_aired := show_data.first_aired):
                 try:
@@ -317,7 +317,7 @@ class TVDBIndexer(BaseIndexer):
                 network = show_data.original_network.name
 
             aliases = self.api.get_aliases(show_data) or {}
-            aliases = self._add_omdb_title_alias(aliases, omdb_metadata)
+            aliases = self._add_metadata_title_alias(aliases, metadata)
 
             slug = (show_data.slug or "").replace("-", " ").title()
             aliases.setdefault("us", []).append(slug.title())
@@ -425,14 +425,16 @@ class TVDBIndexer(BaseIndexer):
                     if season_number is None:
                         continue
 
-                    omdb_season = self.omdb_api.get_season(
+                    provider_season = self.metadata.get_season(
                         show.imdb_id, season_number
                     )
-                    omdb_season_release = (
-                        omdb_season.released_at if omdb_season else None
+                    provider_season_release = (
+                        provider_season.released_at if provider_season else None
                     )
-                    omdb_episode_dates = (
-                        omdb_season.episode_release_dates() if omdb_season else {}
+                    provider_episode_dates = (
+                        provider_season.episode_release_dates()
+                        if provider_season
+                        else {}
                     )
 
                     # Check if this season already exists
@@ -444,12 +446,12 @@ class TVDBIndexer(BaseIndexer):
                             season_item.poster_path = show.poster_path
 
                         self._update_season_metadata(
-                            season_item, extended_data, omdb_season_release
+                            season_item, extended_data, provider_season_release
                         )
                     else:
                         # Create new season
                         season_item = self._create_season_from_data(
-                            extended_data, show, omdb_season_release
+                            extended_data, show, provider_season_release
                         )
 
                         if not season_item:
@@ -478,14 +480,14 @@ class TVDBIndexer(BaseIndexer):
                                 self._update_episode_metadata(
                                     episode_item,
                                     episode_data,
-                                    omdb_episode_dates.get(episode_number),
+                                    provider_episode_dates.get(episode_number),
                                 )
                             else:
                                 # Create new episode
                                 episode_item = self._create_episode_from_data(
                                     episode_data,
                                     season_item,
-                                    omdb_episode_dates.get(episode_number),
+                                    provider_episode_dates.get(episode_number),
                                 )
 
                                 if episode_item:
@@ -497,12 +499,12 @@ class TVDBIndexer(BaseIndexer):
         self,
         season: Season,
         season_data: SeasonExtendedRecord,
-        omdb_release_date: datetime | None = None,
+        provider_release_date: datetime | None = None,
     ):
         """Update an existing Season object with fresh TVDB metadata."""
         try:
             # Parse aired date from first episode
-            aired_at = omdb_release_date
+            aired_at = provider_release_date
 
             try:
                 episodes = season_data.episodes
@@ -533,7 +535,7 @@ class TVDBIndexer(BaseIndexer):
         self,
         season_data: SeasonExtendedRecord,
         show: Show,
-        omdb_release_date: datetime | None = None,
+        provider_release_date: datetime | None = None,
     ) -> Season | None:
         """Create a Season object from TVDB season data."""
         try:
@@ -541,7 +543,7 @@ class TVDBIndexer(BaseIndexer):
             if season_number is None:
                 return None
 
-            aired_at = omdb_release_date
+            aired_at = provider_release_date
 
             try:
                 # TVDB API doesn't return firstAired for seasons so we use the first episode's aired date
@@ -589,12 +591,12 @@ class TVDBIndexer(BaseIndexer):
         self,
         episode: Episode,
         episode_data: EpisodeBaseRecord,
-        omdb_release_date: datetime | None = None,
+        provider_release_date: datetime | None = None,
     ):
         """Update an existing Episode object with fresh TVDB metadata."""
         try:
             # Parse aired date
-            aired_at = omdb_release_date
+            aired_at = provider_release_date
 
             if aired_at is None and (first_aired := episode_data.aired):
                 try:
@@ -624,7 +626,7 @@ class TVDBIndexer(BaseIndexer):
         self,
         episode_data: EpisodeBaseRecord,
         season: Season,
-        omdb_release_date: datetime | None = None,
+        provider_release_date: datetime | None = None,
     ) -> Episode | None:
         """Create an Episode object from TVDB episode data."""
         try:
@@ -633,7 +635,7 @@ class TVDBIndexer(BaseIndexer):
             if episode_number is None:
                 return None
 
-            aired_at = omdb_release_date
+            aired_at = provider_release_date
 
             if aired_at is None and (first_aired := episode_data.aired):
                 try:

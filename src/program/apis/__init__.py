@@ -1,5 +1,6 @@
 from kink import di
 
+from program.metadata import MetadataService
 from program.settings import settings_manager
 
 from .listrr_api import ListrrAPI
@@ -18,7 +19,7 @@ def bootstrap_apis():
     __setup_overseerr()
     __setup_listrr()
     __setup_trakt()
-    __setup_omdb()
+    __setup_metadata()
     __setup_tmdb()
     __setup_tvdb()
 
@@ -27,8 +28,12 @@ def __setup_trakt():
     di[TraktAPI] = TraktAPI(settings_manager.settings.content.trakt)
 
 
-def __setup_omdb():
-    di[OMDbAPI] = OMDbAPI()
+def __setup_metadata():
+    omdb = OMDbAPI()
+    metadata = MetadataService()
+    metadata.register(omdb)
+    di[OMDbAPI] = omdb
+    di[MetadataService] = metadata
 
 
 def __setup_tmdb():
