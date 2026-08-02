@@ -5,11 +5,11 @@ from datetime import datetime
 from kink import di
 from loguru import logger
 
+from program.apis.omdb_api import OMDbAPI, OMDbTitle
 from program.apis.tmdb_api import TMDBApi
-from program.apis.trakt_api import TraktAPI
+from program.core.runner import MediaItemGenerator, RunnerResult
 from program.media.item import MediaItem, Movie
 from program.services.indexers.base import BaseIndexer
-from program.core.runner import MediaItemGenerator, RunnerResult
 
 
 class TMDBIndexer(BaseIndexer):
@@ -19,7 +19,11 @@ class TMDBIndexer(BaseIndexer):
         super().__init__()
 
         self.api = di[TMDBApi]
-        self.trakt_api = di[TraktAPI]
+        self.omdb_api = di[OMDbAPI]
+
+    @staticmethod
+    def _omdb_aliases(metadata: OMDbTitle | None) -> dict[str, list[str]]:
+        return {"us": [metadata.title]} if metadata and metadata.title else {}
 
     def run(
         self,
@@ -109,10 +113,12 @@ class TMDBIndexer(BaseIndexer):
                 )
             )
 
-            # Parse release date
-            release_date = None
+            omdb_metadata = self.omdb_api.get_title(movie_details.imdb_id or imdb_id)
 
-            if movie_details.release_date:
+            # Parse release date
+            release_date = omdb_metadata.released_at if omdb_metadata else None
+
+            if release_date is None and movie_details.release_date:
                 try:
                     release_date = datetime.strptime(
                         movie_details.release_date,
@@ -156,8 +162,7 @@ class TMDBIndexer(BaseIndexer):
 
                         break
 
-            # Aliases
-            aliases = self.trakt_api.get_aliases(movie_details.imdb_id, "movies") or {}
+            aliases = self._omdb_aliases(omdb_metadata)
 
             full_poster_url = (
                 f"https://image.tmdb.org/t/p/w500{movie_details.poster_path}"
@@ -246,11 +251,11 @@ class TMDBIndexer(BaseIndexer):
             return None
 
         try:
-            release_date = (
-                datetime.strptime(movie_details.release_date, "%Y-%m-%d")
-                if movie_details.release_date
-                else None
-            )
+            omdb_metadata = self.omdb_api.get_title(movie_details.imdb_id or imdb_id)
+            release_date = omdb_metadata.released_at if omdb_metadata else None
+
+            if release_date is None and movie_details.release_date:
+                release_date = datetime.strptime(movie_details.release_date, "%Y-%m-%d")
 
             genres = [
                 genre.name.lower() for genre in movie_details.genres or [] if genre.name
@@ -287,8 +292,7 @@ class TMDBIndexer(BaseIndexer):
 
                         break
 
-            # Aliases
-            aliases = self.trakt_api.get_aliases(movie_details.imdb_id, "movies") or {}
+            aliases = self._omdb_aliases(omdb_metadata)
 
             full_poster_url = (
                 f"https://image.tmdb.org/t/p/w500{movie_details.poster_path}"
