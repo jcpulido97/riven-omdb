@@ -1,12 +1,14 @@
 """Torrent utilities for infohash extraction and manipulation."""
 
 import base64
+import binascii
 import re
 
 from loguru import logger
 
 # Pattern to match infohashes in magnet links (supports both 40-char hex and 32-char base32)
 INFOHASH_PATTERN = re.compile(r"btih:([a-fA-F0-9]{40}|[a-zA-Z0-9]{32})", re.IGNORECASE)
+HEX_INFOHASH_PATTERN = re.compile(r"(?<![a-fA-F0-9])([a-fA-F0-9]{40})(?![a-fA-F0-9])")
 
 
 def normalize_infohash(infohash: str) -> str:
@@ -28,7 +30,7 @@ def normalize_infohash(infohash: str) -> str:
             infohash = base64.b16encode(base64.b32decode(infohash.upper())).decode(
                 "utf-8"
             )
-        except Exception as e:
+        except (binascii.Error, ValueError) as e:
             logger.debug(f"Failed to convert base32 infohash to base16: {e}")
             return infohash.lower()
 
@@ -37,8 +39,10 @@ def normalize_infohash(infohash: str) -> str:
 
 def extract_infohash(text: str) -> str | None:
     """
-    Extracts infohash from btih: pattern in strings.
-    Supports both 40-character hex and 32-character base32 formats.
+    Extract an infohash from a BTIH value or a URL path.
+
+    BTIH values support 40-character hexadecimal and 32-character base32
+    formats. URLs may contain a standalone 40-character hexadecimal hash.
 
     Args:
         text: Text that may contain an infohash
@@ -51,6 +55,9 @@ def extract_infohash(text: str) -> str | None:
         return None
 
     match = INFOHASH_PATTERN.search(text)
+
+    if not match:
+        match = HEX_INFOHASH_PATTERN.search(text)
 
     if match:
         infohash = match.group(1)

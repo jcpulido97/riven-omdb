@@ -31,6 +31,7 @@ from program.media.item import (
 )
 from program.media.state import States
 from program.media.stream import Stream as ItemStream
+from program.metadata import normalize_item_identifiers
 from program.program import Program
 from program.services.downloaders import Downloader
 from program.services.downloaders.models import (
@@ -790,6 +791,12 @@ def scrape_item_by_imdb_id(
 
 
 @router.post(
+    "/scrape/start_session",
+    summary="Start a manual scraping session",
+    operation_id="start_manual_session_compatibility",
+    response_model=StartSessionResponse,
+)
+@router.post(
     "/start_session",
     summary="Start a manual scraping session",
     operation_id="start_manual_session",
@@ -805,8 +812,8 @@ async def start_manual_session(
         None, description="Maximum filesize in MB"
     ),
     item_id: Annotated[
-        int | None,
-        Query(description="The ID of the media item"),
+        int | str | None,
+        Query(description="The database ID or IMDb ID of the media item"),
     ] = None,
     tmdb_id: Annotated[
         str | None,
@@ -825,6 +832,11 @@ async def start_manual_session(
         Query(description="The media type"),
     ] = None,
 ) -> StartSessionResponse:
+    try:
+        item_id, imdb_id = normalize_item_identifiers(item_id, imdb_id)
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error))
+
     scraping_session_manager.cleanup_expired(background_tasks)
 
     info_hash = extract_infohash(magnet)

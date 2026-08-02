@@ -1,7 +1,6 @@
 """OMDb implementation of Riven's metadata-provider contract."""
 
 import os
-import re
 from datetime import datetime
 from typing import Any
 
@@ -10,6 +9,7 @@ from loguru import logger
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from requests import RequestException
 
+from program.metadata import normalize_imdb_id
 from program.metadata.models import EpisodeMetadata, SeasonMetadata, TitleMetadata
 from program.utils.request import SmartSession
 
@@ -46,7 +46,6 @@ class OMDbAPI:
     name = "omdb"
     BASE_URL = "https://www.omdbapi.com"
     API_KEY = os.environ.get("OMDB_API_KEY", "")
-    IMDB_ID_PATTERN = re.compile(r"^tt\d{7,10}$", re.IGNORECASE)
 
     def __init__(self, api_key: str | None = None):
         self.api_key = api_key or self.API_KEY
@@ -164,18 +163,14 @@ class OMDbAPI:
         self._season_cache[cache_key] = result
         return result
 
-    @classmethod
-    def normalize_imdb_id(cls, value: str | None) -> str | None:
+    @staticmethod
+    def normalize_imdb_id(value: str | None) -> str | None:
         """Return a canonical IMDb ID or None when the value is invalid."""
 
-        if not value:
-            return None
+        imdb_id = normalize_imdb_id(value)
 
-        imdb_id = value.strip().lower()
-
-        if not cls.IMDB_ID_PATTERN.fullmatch(imdb_id):
+        if value and imdb_id is None:
             logger.debug(f"Invalid IMDb ID for OMDb lookup: {value!r}")
-            return None
 
         return imdb_id
 
