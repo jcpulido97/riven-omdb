@@ -1,4 +1,5 @@
 from kink import di
+from loguru import logger
 
 from program.metadata import MetadataService
 from program.settings import settings_manager
@@ -34,6 +35,14 @@ def __setup_metadata():
     metadata.register(omdb)
     di[OMDbAPI] = omdb
     di[MetadataService] = metadata
+
+    if omdb.is_configured:
+        logger.success("OMDb release metadata provider initialized")
+    else:
+        logger.warning(
+            "OMDB_API_KEY is not configured; release metadata will fall back "
+            "to TMDB and TVDB"
+        )
 
 
 def __setup_tmdb():

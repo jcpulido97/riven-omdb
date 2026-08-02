@@ -115,8 +115,96 @@ def test_api_error_returns_none():
 
 def test_missing_api_key_skips_request():
     api = OMDbAPI(api_key="")
-    api.api_key = ""
     api.session.get = Mock()
 
     assert api.get_title("tt0000001") is None
+    api.session.get.assert_not_called()
+
+
+def test_api_key_is_read_when_provider_is_created(monkeypatch):
+    monkeypatch.setenv("OMDB_API_KEY", " runtime-key ")
+
+    api = OMDbAPI()
+
+    assert api.api_key == "runtime-key"
+    assert api.is_configured
+
+
+def test_get_season_parses_episode_release_dates():
+    api = OMDbAPI(api_key="test-key")
+    response = Mock()
+    response.ok = True
+    response.json.return_value = {
+        "Title": "Example Show",
+        "Season": "2",
+        "Episodes": [
+            {
+                "Title": "Future Episode",
+                "Released": "09 Aug 2026",
+                "Episode": "1",
+                "imdbID": "tt0000002",
+            },
+            {
+                "Title": "Unknown Episode",
+                "Released": "N/A",
+                "Episode": "2",
+                "imdbID": "tt0000003",
+            },
+        ],
+        "Response": "True",
+    }
+    api.session.get = Mock(return_value=response)
+
+    season = api.get_season("tt0000001", 2)
+
+    assert season is not None
+    assert season.number == 2
+    assert season.episodes[0].released_at is not None
+    assert season.episodes[0].released_at.isoformat() == "2026-08-09T00:00:00"
+    assert season.episodes[1].released_at is None
+    api.session.get.assert_called_once_with(
+        "/",
+        params={
+            "apikey": "test-key",
+            "i": "tt0000001",
+            "Season": 2,
+            "r": "json",
+        },
+    )
+
+
+def test_transient_title_failure_is_not_cached():
+    api = OMDbAPI(api_key="test-key")
+    failed = Mock(ok=False, status_code=503)
+    succeeded = Mock(ok=True)
+    succeeded.json.return_value = {
+        "Title": "Recovered",
+        "Released": "01 Jan 2026",
+        "imdbID": "tt0000001",
+        "Type": "movie",
+        "Response": "True",
+    }
+    api.session.get = Mock(side_effect=[failed, succeeded])
+
+    assert api.get_title("tt0000001") is None
+    assert api.get_title("tt0000001") is not None
+    assert api.session.get.call_count == 2
+
+
+def test_non_object_json_response_is_ignored_and_retried():
+    api = OMDbAPI(api_key="test-key")
+    response = Mock(ok=True)
+    response.json.return_value = []
+    api.session.get = Mock(return_value=response)
+
+    assert api.get_title("tt0000001") is None
+    assert api.get_title("tt0000001") is None
+    assert api.session.get.call_count == 2
+
+
+def test_negative_season_does_not_make_request():
+    api = OMDbAPI(api_key="test-key")
+    api.session.get = Mock()
+
+    assert api.get_season("tt0000001", -1) is None
     api.session.get.assert_not_called()

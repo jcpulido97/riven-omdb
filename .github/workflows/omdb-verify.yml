@@ -1,0 +1,53 @@
+name: Verify OMDb Workflow
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes libfuse3-dev
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install 3.13
+
+      - name: Install project dependencies
+        run: uv sync --locked --all-extras --dev
+
+      - name: Lint OMDb integration
+        run: |
+          uv run ruff check \
+            src/program/apis/omdb_api.py \
+            src/program/metadata \
+            src/tests/test_omdb_api.py \
+            src/tests/test_omdb_workflow.py \
+            src/tests/test_metadata_service.py \
+            src/tests/test_metadata_identifiers.py
+
+      - name: Test OMDb and manual-session workflows
+        run: |
+          uv run pytest -q \
+            src/tests/test_omdb_api.py \
+            src/tests/test_omdb_workflow.py \
+            src/tests/test_metadata_service.py \
+            src/tests/test_metadata_identifiers.py \
+            src/tests/test_torrent_utils.py \
+            src/tests/test_scrape_route_compatibility.py

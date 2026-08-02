@@ -15,7 +15,7 @@ services:
     #             condition: service_started
 
     riven:
-        image: spoked/riven:latest
+        image: ghcr.io/jcpulido97/riven-omdb:latest
         container_name: riven
         restart: unless-stopped
         ports:

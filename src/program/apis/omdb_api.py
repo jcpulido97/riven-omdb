@@ -45,10 +45,12 @@ class OMDbAPI:
 
     name = "omdb"
     BASE_URL = "https://www.omdbapi.com"
-    API_KEY = os.environ.get("OMDB_API_KEY", "")
 
     def __init__(self, api_key: str | None = None):
-        self.api_key = api_key or self.API_KEY
+        configured_key = (
+            os.environ.get("OMDB_API_KEY", "") if api_key is None else api_key
+        )
+        self.api_key = configured_key.strip()
         self._title_cache = TTLCache[str, TitleMetadata | None](maxsize=4096, ttl=86400)
         self._season_cache = TTLCache[tuple[str, int], SeasonMetadata | None](
             maxsize=4096, ttl=21600
@@ -78,6 +80,10 @@ class OMDbAPI:
                 return None
 
             data = response.json()
+
+            if not isinstance(data, dict):
+                logger.debug("OMDb returned a non-object JSON response")
+                return None
 
             if data.get("Response") == "False":
                 logger.debug(
@@ -117,7 +123,11 @@ class OMDbAPI:
             logger.debug(f"Invalid OMDb title response for {imdb_id}: {error}")
             result = None
 
-        self._title_cache[imdb_id] = result
+        # Do not cache failures. A temporary outage, rate limit, or malformed
+        # response must be retried during the next indexing pass.
+        if result is not None:
+            self._title_cache[imdb_id] = result
+
         return result
 
     def get_season(
@@ -125,7 +135,7 @@ class OMDbAPI:
     ) -> SeasonMetadata | None:
         imdb_id = self.normalize_imdb_id(imdb_id)
 
-        if imdb_id is None:
+        if imdb_id is None or season_number < 0:
             return None
 
         cache_key = (imdb_id, season_number)
@@ -160,7 +170,9 @@ class OMDbAPI:
             )
             result = None
 
-        self._season_cache[cache_key] = result
+        if result is not None:
+            self._season_cache[cache_key] = result
+
         return result
 
     @staticmethod
