@@ -4,6 +4,7 @@ from program.settings import settings_manager
 
 from .listrr_api import ListrrAPI
 from .mdblist_api import MdblistAPI
+from .omdb_api import OMDbAPI
 from .overseerr_api import OverseerrAPI
 from .plex_api import PlexAPI
 from .tmdb_api import TMDBApi
@@ -17,12 +18,17 @@ def bootstrap_apis():
     __setup_overseerr()
     __setup_listrr()
     __setup_trakt()
+    __setup_omdb()
     __setup_tmdb()
     __setup_tvdb()
 
 
 def __setup_trakt():
     di[TraktAPI] = TraktAPI(settings_manager.settings.content.trakt)
+
+
+def __setup_omdb():
+    di[OMDbAPI] = OMDbAPI()
 
 
 def __setup_tmdb():

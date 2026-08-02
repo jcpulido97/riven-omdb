@@ -51,6 +51,15 @@ We are constantly adding features and improvements as we go along and squashing 
 
 ## Self Hosted
 
+### OMDb release metadata
+
+This fork uses OMDb for movie, show, season, and episode release dates. Set
+`OMDB_API_KEY` in the environment; every OMDb request adds the configured key
+automatically. TMDB and TVDB remain fallbacks when OMDb is not configured or
+has no usable release date, and the optional Trakt content service remains
+available for watchlists, collections, and discovery when configured with your
+own Trakt API key. The upstream hard-coded Trakt client ID has been removed.
+
 ### Installation
 
 1) Find a good place on your hard drive we can call mount from now on. For the sake of things I will call it /path/to/riven/mount.
