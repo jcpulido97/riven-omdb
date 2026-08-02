@@ -19,7 +19,7 @@ from program.services.indexers.omdb import OMDbIndexer
 from program.services.scrapers import Scraping
 from program.services.scrapers.shared import rtn
 from program.types import Event
-from program.metadata import normalize_item_identifiers
+from program.metadata import MetadataLookupError, normalize_item_identifiers
 from program.utils.torrent import extract_infohash
 from program.services.downloaders.models import TorrentContainer, TorrentInfo, DebridFile
 
@@ -219,7 +219,14 @@ def scrape_item(request: Request, id: str) -> ScrapeItemResponse:
 
         if imdb_id:
             prepared_item = MediaItem({"imdb_id": imdb_id})
-            item = next(indexer.run(prepared_item))
+            try:
+                item = next(indexer.run(prepared_item))
+            except MetadataLookupError as error:
+                raise HTTPException(
+                    status_code=error.http_status, detail=str(error)
+                ) from error
+            except StopIteration:
+                raise HTTPException(status_code=404, detail="IMDb item not found")
         else:
             item: MediaItem = (
                 db_session.execute(
@@ -284,6 +291,10 @@ async def start_manual_session(
         prepared_item = MediaItem({"imdb_id": imdb_id})
         try:
             item = next(indexer.run(prepared_item))
+        except MetadataLookupError as error:
+            raise HTTPException(
+                status_code=error.http_status, detail=str(error)
+            ) from error
         except StopIteration:
             raise HTTPException(status_code=404, detail="IMDb item not found in OMDb")
     else:
@@ -374,6 +385,10 @@ async def manual_update_attributes(request: Request, session_id, data: Union[Deb
             prepared_item = MediaItem({"imdb_id": session.item_id})
             try:
                 item = next(indexer.run(prepared_item))
+            except MetadataLookupError as error:
+                raise HTTPException(
+                    status_code=error.http_status, detail=str(error)
+                ) from error
             except StopIteration:
                 raise HTTPException(status_code=404, detail="IMDb item not found in OMDb")
             db_session.merge(item)

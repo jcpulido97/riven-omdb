@@ -16,6 +16,7 @@ from program.db import db_functions
 from program.db.db import db, get_db
 from program.media.item import MediaItem
 from program.media.state import States
+from program.metadata import MetadataLookupError
 from program.services.content import Overseerr
 from program.services.indexers.omdb import OMDbIndexer
 from program.symlink import Symlinker
@@ -646,11 +647,16 @@ async def reindex_item(request: Request, item_id: Optional[str] = None, imdb_id:
             request.app.program.em.add_event(Event("RetryItem", item.id))
             return ReindexResponse(message=f"Successfully reindexed {item.log_string}")
         else:
-            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to reindex item - no data returned from Trakt")
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No metadata returned by OMDb")
 
+    except MetadataLookupError as e:
+        logger.error(f"Failed to reindex {item.log_string}: {e}")
+        raise HTTPException(status_code=e.http_status, detail=str(e)) from e
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Failed to reindex {item.log_string}: {str(e)}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to reindex item: {str(e)}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to reindex item: {str(e)}") from e
 
 class FfprobeResponse(BaseModel):
     message: str

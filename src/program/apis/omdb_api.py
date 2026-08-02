@@ -3,11 +3,10 @@ from datetime import datetime
 from typing import Any
 
 from cachetools import TTLCache
-from loguru import logger
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from requests import RequestException
 
-from program.metadata import normalize_imdb_id
+from program.metadata import MetadataProviderError, normalize_imdb_id
 from program.metadata.models import EpisodeMetadata, SeasonMetadata, TitleMetadata
 from program.utils.request import create_service_session, get_rate_limit_params
 
@@ -71,22 +70,48 @@ class OMDbAPI:
                 params={"apikey": self.api_key, **params},
                 timeout=30,
             )
-            if not response.ok:
-                logger.debug(f"OMDb request failed with HTTP {response.status_code}")
-                return None
+        except RequestException as error:
+            raise MetadataProviderError(
+                self.name,
+                f"request failed: {error}",
+                http_status=503,
+            ) from error
+        try:
             data = response.json()
-            if not isinstance(data, dict):
-                logger.debug("OMDb returned a non-object JSON response")
-                return None
-            if data.get("Response") == "False":
-                logger.debug(
-                    f"OMDb request failed: {data.get('Error', 'unknown error')}"
-                )
-                return None
-            return data
-        except (RequestException, ValueError, TypeError) as error:
-            logger.debug(f"OMDb request failed: {error}")
-            return None
+        except (ValueError, TypeError) as error:
+            raise MetadataProviderError(
+                self.name,
+                "returned an invalid JSON response",
+                upstream_status=response.status_code,
+            ) from error
+        if not isinstance(data, dict):
+            raise MetadataProviderError(
+                self.name,
+                "returned a non-object JSON response",
+                upstream_status=response.status_code,
+            )
+        if data.get("Response") == "False":
+            message = str(data.get("Error", "unknown error"))
+            normalized_message = message.lower()
+            if "limit" in normalized_message:
+                http_status = 429
+            elif "not found" in normalized_message:
+                http_status = 404
+            else:
+                http_status = 502
+            raise MetadataProviderError(
+                self.name,
+                message,
+                http_status=http_status,
+                upstream_status=response.status_code,
+            )
+        if not response.ok:
+            raise MetadataProviderError(
+                self.name,
+                f"HTTP {response.status_code}",
+                upstream_status=response.status_code,
+            )
+        return data
 
     def get_title(self, imdb_id: str | None) -> TitleMetadata | None:
         imdb_id = normalize_imdb_id(imdb_id)
@@ -99,8 +124,9 @@ class OMDbAPI:
             response = _OMDbTitleResponse.model_validate(data) if data else None
             result = self._map_title(response) if response else None
         except ValidationError as error:
-            logger.debug(f"Invalid OMDb title response for {imdb_id}: {error}")
-            result = None
+            raise MetadataProviderError(
+                self.name, f"invalid title response for {imdb_id}: {error}"
+            ) from error
         if result is not None:
             self._title_cache[imdb_id] = result
         return result
@@ -135,10 +161,10 @@ class OMDbAPI:
                 else None
             )
         except ValidationError as error:
-            logger.debug(
-                f"Invalid OMDb season response for {imdb_id} S{season_number}: {error}"
-            )
-            result = None
+            raise MetadataProviderError(
+                self.name,
+                f"invalid season response for {imdb_id} S{season_number}: {error}",
+            ) from error
         if result is not None:
             self._season_cache[cache_key] = result
         return result

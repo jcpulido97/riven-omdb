@@ -1,11 +1,16 @@
 from unittest.mock import Mock
 
+import pytest
 from kink import di
 
 from program.apis.omdb_api import OMDbAPI
 from program.media.item import MediaItem, Movie, Show
 from program.media.state import States
-from program.metadata import MetadataService
+from program.metadata import (
+    MetadataLookupError,
+    MetadataProviderError,
+    MetadataService,
+)
 from program.services.indexers.omdb import OMDbIndexer
 from program.state_transition import process_event
 
@@ -154,7 +159,8 @@ def test_transient_failure_is_not_cached():
         ]
     )
 
-    assert api.get_title("tt0000001") is None
+    with pytest.raises(MetadataProviderError, match="omdb: HTTP 503"):
+        api.get_title("tt0000001")
     assert api.get_title("tt0000001") is not None
     assert api.session.get.call_count == 2
 
@@ -179,8 +185,28 @@ def test_indexer_retries_after_transient_provider_failure():
     indexer = OMDbIndexer()
     item = MediaItem({"imdb_id": "tt0000001"})
 
-    assert list(indexer.run(item)) == []
+    with pytest.raises(MetadataLookupError, match="omdb: HTTP 503"):
+        list(indexer.run(item))
     assert isinstance(next(indexer.run(item)), Movie)
+
+
+def test_omdb_quota_error_preserves_message_and_maps_to_http_429():
+    api = OMDbAPI(api_key="test-key")
+    api.session.get = Mock(
+        return_value=_response(
+            {"Response": "False", "Error": "Request limit reached!"},
+            ok=False,
+            status_code=401,
+        )
+    )
+    service = MetadataService([api])
+
+    with pytest.raises(MetadataLookupError) as captured:
+        service.get_title("tt1879016")
+
+    assert str(captured.value) == "omdb: Request limit reached!"
+    assert captured.value.http_status == 429
+    assert captured.value.errors[0].upstream_status == 401
 
 
 def test_missing_key_skips_requests():

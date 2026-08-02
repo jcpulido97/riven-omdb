@@ -3,7 +3,7 @@ from collections.abc import Iterable
 from loguru import logger
 
 from .models import EpisodeMetadata, SeasonMetadata, TitleMetadata
-from .provider import MetadataProvider
+from .provider import MetadataLookupError, MetadataProvider, MetadataProviderError
 
 
 class MetadataService:
@@ -28,30 +28,67 @@ class MetadataService:
 
     def get_title(self, imdb_id: str | None) -> TitleMetadata | None:
         result = None
-        for provider in self.configured_providers:
+        providers = self._require_configured_providers()
+        errors = []
+        for provider in providers:
             try:
                 if metadata := provider.get_title(imdb_id):
                     result = self._merge_title(result, metadata)
-            except Exception as error:
+            except MetadataProviderError as error:
+                errors.append(error)
                 logger.warning(
                     f"Metadata provider {provider.name} failed for {imdb_id}: {error}"
                 )
+            except Exception as error:
+                provider_error = MetadataProviderError(provider.name, str(error))
+                errors.append(provider_error)
+                logger.exception(
+                    f"Metadata provider {provider.name} failed for {imdb_id}: {error}"
+                )
+        if result is None and errors:
+            raise MetadataLookupError(errors)
         return result
 
     def get_season(
         self, imdb_id: str | None, season_number: int
     ) -> SeasonMetadata | None:
         result = None
-        for provider in self.configured_providers:
+        providers = self._require_configured_providers()
+        errors = []
+        for provider in providers:
             try:
                 if metadata := provider.get_season(imdb_id, season_number):
                     result = self._merge_season(result, metadata)
-            except Exception as error:
+            except MetadataProviderError as error:
+                errors.append(error)
                 logger.warning(
                     f"Metadata provider {provider.name} failed for "
                     f"{imdb_id} S{season_number}: {error}"
                 )
+            except Exception as error:
+                provider_error = MetadataProviderError(provider.name, str(error))
+                errors.append(provider_error)
+                logger.exception(
+                    f"Metadata provider {provider.name} failed for "
+                    f"{imdb_id} S{season_number}: {error}"
+                )
+        if result is None and errors:
+            raise MetadataLookupError(errors)
         return result
+
+    def _require_configured_providers(self) -> tuple[MetadataProvider, ...]:
+        providers = self.configured_providers
+        if not providers:
+            raise MetadataLookupError(
+                [
+                    MetadataProviderError(
+                        "metadata",
+                        "No metadata provider is configured",
+                        http_status=503,
+                    )
+                ]
+            )
+        return providers
 
     @staticmethod
     def _merge_title(
