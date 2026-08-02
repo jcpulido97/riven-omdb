@@ -1,12 +1,15 @@
 """Torrent utilities for infohash extraction and manipulation."""
 
 import base64
+import binascii
 import re
+from urllib.parse import unquote, urlparse
 
 from loguru import logger
 
 # Pattern to match infohashes in magnet links (supports both 40-char hex and 32-char base32)
 INFOHASH_PATTERN = re.compile(r"btih:([a-fA-F0-9]{40}|[a-zA-Z0-9]{32})", re.IGNORECASE)
+HEX_INFOHASH_PATTERN = re.compile(r"^[a-fA-F0-9]{40}$")
 
 
 def normalize_infohash(infohash: str) -> str:
@@ -28,7 +31,7 @@ def normalize_infohash(infohash: str) -> str:
             infohash = base64.b16encode(base64.b32decode(infohash.upper())).decode(
                 "utf-8"
             )
-        except Exception as e:
+        except (binascii.Error, ValueError) as e:
             logger.debug(f"Failed to convert base32 infohash to base16: {e}")
             return infohash.lower()
 
@@ -37,8 +40,10 @@ def normalize_infohash(infohash: str) -> str:
 
 def extract_infohash(text: str) -> str | None:
     """
-    Extracts infohash from btih: pattern in strings.
-    Supports both 40-character hex and 32-character base32 formats.
+    Extract an infohash from a magnet, raw hash, or URL path.
+
+    URL support covers debrid stream links such as Peerflix, where the
+    40-character hexadecimal torrent hash is stored in its own path segment.
 
     Args:
         text: Text that may contain an infohash
@@ -53,8 +58,16 @@ def extract_infohash(text: str) -> str | None:
     match = INFOHASH_PATTERN.search(text)
 
     if match:
-        infohash = match.group(1)
+        return normalize_infohash(match.group(1))
 
-        return normalize_infohash(infohash)
+    candidate = text.strip()
+    if HEX_INFOHASH_PATTERN.fullmatch(candidate):
+        return normalize_infohash(candidate)
+
+    parsed = urlparse(candidate)
+    if parsed.scheme in {"http", "https"} and parsed.netloc:
+        for segment in unquote(parsed.path).split("/"):
+            if HEX_INFOHASH_PATTERN.fullmatch(segment):
+                return normalize_infohash(segment)
 
     return None

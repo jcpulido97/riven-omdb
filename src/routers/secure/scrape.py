@@ -1102,6 +1102,11 @@ def _download_and_update(
 
 
 @router.post(
+    "/scrape/session/{session_id}",
+    summary="Perform an action on a scraping session",
+    operation_id="session_action_compatibility",
+)
+@router.post(
     "/session/{session_id}",
     summary="Perform an action on a scraping session",
     operation_id="session_action",
