@@ -27,27 +27,20 @@ class Updater:
             logger.error("Updater is not initialized properly.")
             return
 
-        initialized_services = [
-            service for service in self.services.values() if service.initialized
-        ]
-        update_succeeded = not initialized_services
         for service_cls, service in self.services.items():
             if service.initialized:
                 try:
                     updated_item = next(service.run(item), None)
                     if updated_item is not None:
                         item = updated_item
-                        update_succeeded = True
                 except Exception as e:
                     logger.error(f"{service_cls.__name__} failed to update {item.log_string}: {e}")
 
-        if not update_succeeded:
-            logger.error(
-                f"No media server successfully updated {item.log_string}; "
-                "leaving it in the Symlinked state"
-            )
-            return
-
+        # Media-server refreshes are optional notifications, not confirmation
+        # that the symlink workflow completed. Once every configured updater has
+        # been attempted, mark the item updated even if a service returned no
+        # item or raised; otherwise it remains Symlinked forever and is retried
+        # on every state transition.
         for _item in get_items_to_update(item):
             _item.set("update_folder", "updated")
         yield item

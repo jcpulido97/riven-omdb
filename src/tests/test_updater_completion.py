@@ -26,16 +26,16 @@ def _updater(service) -> Updater:
     return updater
 
 
-def test_failed_media_server_update_does_not_complete_item():
+def test_empty_media_server_update_still_completes_item():
     service = Mock(initialized=True)
     service.run.return_value = iter(())
     movie = _movie()
 
     result = list(_updater(service).run(movie))
 
-    assert result == []
-    assert movie.update_folder != "updated"
-    assert movie.state == States.Symlinked
+    assert result == [movie]
+    assert movie.update_folder == "updated"
+    assert movie.state == States.Completed
 
 
 def test_successful_media_server_update_completes_item():
@@ -50,15 +50,16 @@ def test_successful_media_server_update_completes_item():
     assert movie.state == States.Completed
 
 
-def test_media_server_exception_does_not_complete_item():
+def test_media_server_exception_does_not_block_completion():
     service = Mock(initialized=True)
     service.run.side_effect = RuntimeError("refresh failed")
     movie = _movie()
 
     result = list(_updater(service).run(movie))
 
-    assert result == []
-    assert movie.state == States.Symlinked
+    assert result == [movie]
+    assert movie.update_folder == "updated"
+    assert movie.state == States.Completed
 
 
 def test_no_configured_media_server_keeps_optional_updater_behavior():

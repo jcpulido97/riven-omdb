@@ -94,6 +94,20 @@ def test_api_serializes_frontend_type_and_correct_parent_ids():
         "tvdb_id": "121361",
         "tmdb_id": "1399",
     }
+    assert serialized["poster_path"] == (
+        "https://images.metahub.space/poster/small/tt0944947/img"
+    )
+
+
+def test_movie_api_serializes_poster_for_existing_database_rows():
+    with db.Session() as session:
+        _stored_movie(session)
+
+    result = asyncio.run(get_item(None, "tt1879016", media_type="movie"))
+
+    assert result["poster_path"] == (
+        "https://images.metahub.space/poster/small/tt1879016/img"
+    )
 
 
 def test_background_backfill_repairs_existing_omdb_item():

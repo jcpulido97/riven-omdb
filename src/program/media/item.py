@@ -261,6 +261,12 @@ class MediaItem(db.Model):
             id_type: getattr(parent, id_type, None)
             for id_type in ("trakt_id", "imdb_id", "tvdb_id", "tmdb_id")
         }
+        poster_imdb_id = getattr(parent, "imdb_id", None)
+        poster_path = (
+            f"https://images.metahub.space/poster/small/{poster_imdb_id}/img"
+            if poster_imdb_id
+            else None
+        )
 
         if self.type == "season":
             parent_title = self.parent.title
@@ -282,6 +288,7 @@ class MediaItem(db.Model):
             "tvdb_id": self.tvdb_id if hasattr(self, "tvdb_id") else None,
             "tmdb_id": self.tmdb_id if hasattr(self, "tmdb_id") else None,
             "parent_ids": parent_ids,
+            "poster_path": poster_path,
             "state": self.last_state.name,
             "imdb_link": self.imdb_link if hasattr(self, "imdb_link") else None,
             "aired_at": str(self.aired_at),
