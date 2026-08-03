@@ -115,4 +115,4 @@ class PlexUpdater:
             else:
                 logger.log("PLEX", f"Updated section {section_name} for {item.log_string}")
 
-        yield item
+            yield item

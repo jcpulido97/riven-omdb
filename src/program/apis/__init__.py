@@ -4,6 +4,7 @@ from loguru import logger
 from program.metadata import MetadataService
 from program.settings.manager import settings_manager
 
+from .cinemeta_api import CinemetaAPI
 from .listrr_api import ListrrAPI, ListrrAPIError
 from .mdblist_api import MdblistAPI, MdblistAPIError
 from .omdb_api import OMDbAPI
@@ -14,6 +15,7 @@ from .trakt_api import TraktAPI, TraktAPIError
 
 def bootstrap_apis():
     __setup_trakt()
+    __setup_identifiers()
     __setup_metadata()
     __setup_plex()
     __setup_mdblist()
@@ -23,6 +25,10 @@ def bootstrap_apis():
 def __setup_trakt():
     traktApi = TraktAPI(settings_manager.settings.content.trakt)
     di[TraktAPI] = traktApi
+
+
+def __setup_identifiers():
+    di[CinemetaAPI] = CinemetaAPI()
 
 
 def __setup_metadata():

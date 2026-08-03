@@ -225,13 +225,28 @@ async def add_items(request: Request, imdb_ids: str = None) -> MessageResponse:
     description="Fetch a single media item by ID",
     operation_id="get_item",
 )
-async def get_item(_: Request, id: str, use_tmdb_id: Optional[bool] = False) -> dict:
+async def get_item(
+    _: Request,
+    id: str,
+    use_tmdb_id: Optional[bool] = False,
+    media_type: Optional[str] = None,
+) -> dict:
     with db.Session() as session:
         query = select(MediaItem)
         if use_tmdb_id:
             query = query.where(MediaItem.tmdb_id == id).where(MediaItem.type.in_(["movie", "show"]))
         else:
-            query = query.where(MediaItem.id == id)
+            query = query.where(
+                or_(
+                    MediaItem.id == id,
+                    MediaItem.imdb_id == id,
+                    MediaItem.tmdb_id == id,
+                    MediaItem.tvdb_id == id,
+                )
+            )
+            if media_type:
+                normalized_type = "show" if media_type in ("tv", "series") else media_type
+                query = query.where(MediaItem.type == normalized_type)
         try:
             item = session.execute(query).unique().scalar_one_or_none()
             if item:

@@ -4,6 +4,7 @@ from typing import Generator, Union
 from kink import di
 from loguru import logger
 
+from program.apis.cinemeta_api import CinemetaAPI
 from program.media.item import Episode, MediaItem, Movie, Season, Show
 from program.metadata import MetadataService, SeasonMetadata, TitleMetadata
 from program.settings.manager import settings_manager
@@ -19,13 +20,18 @@ class OMDbIndexer:
         self.initialized = True
         self.settings = settings_manager.settings.indexer
         self.metadata = di[MetadataService]
+        self.identifiers = di[CinemetaAPI]
 
     @staticmethod
     def copy_attributes(source, target):
         attributes = [
             "id",
+            "trakt_id",
+            "tvdb_id",
+            "tmdb_id",
             "file",
             "folder",
+            "alternative_folder",
             "update_folder",
             "symlinked",
             "is_anime",
@@ -39,7 +45,10 @@ class OMDbIndexer:
             "streams",
         ]
         for attr in attributes:
-            target.set(attr, getattr(source, attr, None))
+            value = getattr(source, attr, None)
+            if attr in ("trakt_id", "tvdb_id", "tmdb_id") and value is None:
+                continue
+            target.set(attr, value)
 
     def copy_items(self, source: MediaItem, target: MediaItem):
         is_anime = source.is_anime or target.is_anime
@@ -112,6 +121,12 @@ class OMDbIndexer:
 
         if isinstance(item, Show):
             self._add_seasons_to_show(item, metadata)
+
+        external_ids = self.identifiers.get_external_ids(
+            metadata.imdb_id, metadata.media_type
+        )
+        item.tmdb_id = external_ids.tmdb_id
+        item.tvdb_id = external_ids.tvdb_id
 
         item = self.copy_items(in_item, item)
         item.indexed_at = datetime.now()

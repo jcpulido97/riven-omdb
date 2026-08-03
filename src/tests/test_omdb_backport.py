@@ -2,7 +2,9 @@ from unittest.mock import Mock
 
 import pytest
 from kink import di
+from requests import RequestException
 
+from program.apis.cinemeta_api import CinemetaAPI, ExternalIDs
 from program.apis.omdb_api import OMDbAPI
 from program.media.item import MediaItem, Movie, Show
 from program.media.state import States
@@ -21,10 +23,55 @@ def _response(data: dict, *, ok: bool = True, status_code: int = 200) -> Mock:
     return response
 
 
+@pytest.fixture(autouse=True)
+def identifier_resolver():
+    resolver = Mock(spec=CinemetaAPI)
+    resolver.get_external_ids.return_value = ExternalIDs()
+    di[CinemetaAPI] = resolver
+    return resolver
+
+
 def test_api_key_is_read_at_provider_creation(monkeypatch):
     monkeypatch.setenv("OMDB_API_KEY", " runtime-key ")
 
     assert OMDbAPI().api_key == "runtime-key"
+
+
+def test_cinemeta_resolves_frontend_ids():
+    resolver = CinemetaAPI()
+    response = _response(
+        {
+            "meta": {
+                "id": "tt0944947",
+                "moviedb_id": 1399,
+                "tvdb_id": 121361,
+            }
+        }
+    )
+    response.raise_for_status = Mock()
+    resolver.session.get = Mock(return_value=response)
+
+    ids = resolver.get_external_ids("tt0944947", "series")
+
+    assert ids == ExternalIDs(tmdb_id="1399", tvdb_id="121361")
+    resolver.session.get.assert_called_once_with(
+        "https://v3-cinemeta.strem.io/meta/series/tt0944947.json", timeout=30
+    )
+
+
+def test_cinemeta_does_not_cache_transient_failures():
+    resolver = CinemetaAPI()
+    failed = _response({}, ok=False, status_code=503)
+    failed.raise_for_status.side_effect = RequestException("HTTP 503")
+    recovered = _response({"meta": {"moviedb_id": 661231}})
+    recovered.raise_for_status = Mock()
+    resolver.session.get = Mock(side_effect=[failed, recovered])
+
+    assert resolver.get_external_ids("tt1879016", "movie") == ExternalIDs()
+    assert resolver.get_external_ids("tt1879016", "movie") == ExternalIDs(
+        tmdb_id="661231"
+    )
+    assert resolver.session.get.call_count == 2
 
 
 def test_movie_request_maps_release_metadata_and_api_key():
@@ -140,6 +187,49 @@ def test_movie_release_date_drives_release_state():
     assert isinstance(movie, Movie)
     assert movie.id == "movie_tt7654321"
     assert movie.state == States.Unreleased
+
+
+def test_indexer_sets_frontend_external_ids(identifier_resolver):
+    api = OMDbAPI(api_key="test-key")
+    api.session.get = Mock(
+        return_value=_response(
+            {
+                "Title": "Operation Mincemeat",
+                "Released": "11 May 2022",
+                "imdbID": "tt1879016",
+                "Type": "movie",
+                "Response": "True",
+            }
+        )
+    )
+    identifier_resolver.get_external_ids.return_value = ExternalIDs(
+        tmdb_id="661231"
+    )
+    di[MetadataService] = MetadataService([api])
+
+    movie = next(OMDbIndexer().run(MediaItem({"imdb_id": "tt1879016"})))
+    movie.store_state()
+
+    assert movie.id == "movie_tt1879016"
+    assert movie.tmdb_id == "661231"
+    assert movie.to_dict()["type"] == "movie"
+    assert movie.to_dict()["tmdb_id"] == "661231"
+
+
+def test_reindex_preserves_existing_external_ids():
+    source = Movie(
+        {
+            "id": "movie_tt1879016",
+            "imdb_id": "tt1879016",
+            "tmdb_id": "661231",
+            "type": "movie",
+        }
+    )
+    target = Movie({"imdb_id": "tt1879016", "type": "movie"})
+
+    copied = OMDbIndexer().copy_items(source, target)
+
+    assert copied.tmdb_id == "661231"
 
 
 def test_transient_failure_is_not_cached():

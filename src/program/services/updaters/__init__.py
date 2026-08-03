@@ -27,14 +27,27 @@ class Updater:
             logger.error("Updater is not initialized properly.")
             return
 
+        initialized_services = [
+            service for service in self.services.values() if service.initialized
+        ]
+        update_succeeded = not initialized_services
         for service_cls, service in self.services.items():
             if service.initialized:
                 try:
-                    item = next(service.run(item))
+                    updated_item = next(service.run(item), None)
+                    if updated_item is not None:
+                        item = updated_item
+                        update_succeeded = True
                 except Exception as e:
                     logger.error(f"{service_cls.__name__} failed to update {item.log_string}: {e}")
 
-        # Lets update the attributes of the item and its children, we dont care if the service updated it or not.
+        if not update_succeeded:
+            logger.error(
+                f"No media server successfully updated {item.log_string}; "
+                "leaving it in the Symlinked state"
+            )
+            return
+
         for _item in get_items_to_update(item):
             _item.set("update_folder", "updated")
         yield item

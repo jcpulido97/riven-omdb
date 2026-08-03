@@ -57,9 +57,9 @@ class JellyfinUpdater:
 
     def run(self, item: MediaItem) -> Generator[MediaItem, None, None]:
         """Update Jellyfin library for a single item or a season with its episodes"""
-        self.update_item()
-        logger.log("JELLYFIN", f"Updated {item.log_string}")
-        yield item
+        if self.update_item():
+            logger.log("JELLYFIN", f"Updated {item.log_string}")
+            yield item
 
 
     def update_item(self) -> bool:

@@ -88,7 +88,7 @@ class EmbyUpdater:
             else:
                 logger.log("EMBY", f"Updated {item.log_string}")
 
-        yield item
+            yield item
 
 
     def update_item(self, item: MediaItem) -> bool:

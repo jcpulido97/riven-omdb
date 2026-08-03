@@ -252,33 +252,28 @@ class MediaItem(db.Model):
         parent_title = self.title
         season_number = None
         episode_number = None
+        parent = self
+        if self.type == "season":
+            parent = self.parent
+        elif self.type == "episode":
+            parent = self.parent.parent
         parent_ids = {
-            "trakt_id": self.tmdb_id if hasattr(self, "tmdb_id") else None,
-            "imdb_id": self.imdb_id if hasattr(self, "imdb_id") else None,
-            "tvdb_id": self.tvdb_id if hasattr(self, "tvdb_id") else None,
-            "tmdb_id": self.tvdb_id if hasattr(self, "tvdb_id") else None
+            id_type: getattr(parent, id_type, None)
+            for id_type in ("trakt_id", "imdb_id", "tvdb_id", "tmdb_id")
         }
 
         if self.type == "season":
             parent_title = self.parent.title
             season_number = self.number
-            parent_ids["trakt_id"] = self.parent.trakt_id if hasattr(self, "parent") and hasattr(self.parent, "trakt_id") else None
-            parent_ids["imdb_id"] = self.parent.imdb_id if hasattr(self, "parent") and hasattr(self.parent, "imdb_id") else None
-            parent_ids["tvdb_id"] = self.parent.tvdb_id if hasattr(self, "parent") and hasattr(self.parent, "tvdb_id") else None
-            parent_ids["tmdb_id"] = self.parent.tmdb_id if hasattr(self, "parent") and hasattr(self.parent, "tmdb_id") else None
         elif self.type == "episode":
             parent_title = self.parent.parent.title
             season_number = self.parent.number
             episode_number = self.number
-            parent_ids["trakt_id"] = self.parent.parent.trakt_id if hasattr(self, "parent") and hasattr(self.parent, "trakt_id") else None
-            parent_ids["imdb_id"] = self.parent.parent.imdb_id if hasattr(self, "parent") and hasattr(self.parent, "parent") and hasattr(self.parent.parent, "imdb_id") else None
-            parent_ids["tvdb_id"] = self.parent.parent.tvdb_id if hasattr(self, "parent") and hasattr(self.parent, "parent") and hasattr(self.parent.parent, "tvdb_id") else None
-            parent_ids["tmdb_id"] = self.parent.parent.tmdb_id if hasattr(self, "parent") and hasattr(self.parent, "parent") and hasattr(self.parent.parent, "tmdb_id") else None
 
         return {
             "id": str(self.id),
             "title": self.title,
-            "type": self.__class__.__name__,
+            "type": self.type,
             "parent_title": parent_title,
             "season_number": season_number,
             "episode_number": episode_number,

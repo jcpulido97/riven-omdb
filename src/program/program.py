@@ -39,7 +39,7 @@ from .types import Event
 if settings_manager.settings.tracemalloc:
     import tracemalloc
 
-from sqlalchemy import func, select, text
+from sqlalchemy import func, or_, select, text
 
 from program.db import db_functions
 from program.db.db import (
@@ -212,9 +212,55 @@ class Program(threading.Thread):
             else:
                 logger.log("PROGRAM", "No items required state updates")
 
+    def _backfill_external_ids(self) -> None:
+        """Repair OMDb items created without frontend navigation IDs."""
+        attempted = getattr(self, "_external_id_backfill_attempted", set())
+        with db.Session() as session:
+            items = (
+                session.execute(
+                    select(MediaItem)
+                    .where(
+                        MediaItem.imdb_id.is_not(None),
+                        MediaItem.id.not_in(attempted),
+                        or_(
+                            (MediaItem.type == "movie")
+                            & MediaItem.tmdb_id.is_(None),
+                            (MediaItem.type == "show")
+                            & MediaItem.tvdb_id.is_(None),
+                        )
+                    )
+                    .limit(20)
+                )
+                .unique()
+                .scalars()
+                .all()
+            )
+            if not items:
+                self._external_id_backfill_attempted = set()
+                return
+            repaired = 0
+            resolver = self.services[OMDbIndexer].identifiers
+            for item in items:
+                attempted.add(item.id)
+                ids = resolver.get_external_ids(item.imdb_id, item.type)
+                if not item.tmdb_id and ids.tmdb_id:
+                    item.tmdb_id = ids.tmdb_id
+                if not item.tvdb_id and ids.tvdb_id:
+                    item.tvdb_id = ids.tvdb_id
+                if ids.tmdb_id or ids.tvdb_id:
+                    repaired += 1
+            session.commit()
+            if repaired:
+                logger.log(
+                    "DATABASE",
+                    f"Backfilled external IDs for {repaired} OMDb items",
+                )
+            self._external_id_backfill_attempted = attempted
+
     def _schedule_functions(self) -> None:
         """Schedule each service based on its update interval."""
         scheduled_functions = {
+            self._backfill_external_ids: {"interval": 60},
             self._update_ongoing: {"interval": 60 * 60 * 4},
             self._retry_library: {"interval": 60 * 60 * 24},
             log_cleaner: {"interval": 60 * 60},
