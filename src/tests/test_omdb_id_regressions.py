@@ -85,9 +85,11 @@ def test_api_serializes_frontend_type_and_correct_parent_ids():
     show.add_season(season)
     show.store_state()
 
+    assert show.to_dict()["type"] == "Show"
+
     serialized = season.to_dict()
 
-    assert serialized["type"] == "season"
+    assert serialized["type"] == "Season"
     assert serialized["parent_ids"] == {
         "trakt_id": None,
         "imdb_id": "tt0944947",

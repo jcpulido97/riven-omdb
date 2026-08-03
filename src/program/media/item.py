@@ -279,7 +279,9 @@ class MediaItem(db.Model):
         return {
             "id": str(self.id),
             "title": self.title,
-            "type": self.type,
+            # The frontend uses the polymorphic class name to select the detail
+            # route (Movie -> /movie, Show/Season/Episode -> /tv).
+            "type": self.__class__.__name__,
             "parent_title": parent_title,
             "season_number": season_number,
             "episode_number": episode_number,

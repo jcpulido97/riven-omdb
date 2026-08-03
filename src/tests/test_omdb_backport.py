@@ -212,7 +212,7 @@ def test_indexer_sets_frontend_external_ids(identifier_resolver):
 
     assert movie.id == "movie_tt1879016"
     assert movie.tmdb_id == "661231"
-    assert movie.to_dict()["type"] == "movie"
+    assert movie.to_dict()["type"] == "Movie"
     assert movie.to_dict()["tmdb_id"] == "661231"
 
 
